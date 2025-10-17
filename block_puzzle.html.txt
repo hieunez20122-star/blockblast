@@ -1,0 +1,565 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Trò Chơi Xếp Hình Khối</title>
+    <!-- Tải Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        /* Cấu hình Font và các kiểu cơ bản */
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #0f172a; /* Blue-Gray 900 */
+        }
+        /* Style cho mỗi ô trong lưới */
+        .grid-cell {
+            width: 100%;
+            padding-bottom: 100%; /* Đảm bảo tỷ lệ 1:1 */
+            position: relative;
+            background-color: #2e4372; /* Blue-Gray 700 */
+            border: 1px solid #1e293b; /* Blue-Gray 800 */
+            transition: background-color 0.1s ease;
+            cursor: pointer;
+        }
+        .grid-cell.highlight {
+            background-color: #6366f1 !important; /* Indigo 500 */
+        }
+        .grid-cell-content {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            border-radius: 4px;
+            transition: transform 0.2s;
+        }
+        /* Style cho các khối đã đặt */
+        .block-placed {
+            box-shadow: 0 0 8px rgba(0, 0, 0, 0.4);
+            transform: scale(0.95);
+        }
+        
+        /* Style cho khu vực khối chờ */
+        .block-slot {
+            display: inline-block;
+            cursor: pointer;
+            padding: 8px;
+            border-radius: 12px;
+            transition: transform 0.2s, box-shadow 0.2s;
+        }
+        .block-slot:hover {
+            transform: scale(1.05);
+        }
+        .block-slot.selected {
+            border: 4px solid #f97316; /* Orange 500 */
+            box-shadow: 0 0 15px #f97316;
+            transform: scale(1.1);
+        }
+        /* Responsive Grid */
+        #game-board {
+            width: 100%;
+            max-width: 400px; /* Giới hạn kích thước trên desktop/tablet */
+            margin: 0 auto;
+        }
+    </style>
+</head>
+<body class="p-4 sm:p-8 flex justify-center items-start min-h-screen">
+
+    <div class="w-full max-w-4xl">
+        <h1 class="text-4xl font-extrabold text-white text-center mb-6">
+            Block Puzzle Web
+        </h1>
+
+        <!-- Khu vực Điểm số và Bảng điều khiển -->
+        <div class="flex justify-between items-center bg-gray-800 p-4 rounded-xl shadow-lg mb-6">
+            <div class="text-xl text-gray-300 font-semibold">
+                Điểm: <span id="score-display" class="text-yellow-400 text-3xl tabular-nums">0</span>
+            </div>
+            <button id="reset-button" class="bg-red-600 hover:bg-red-700 text-white font-bold py-2 px-4 rounded-lg shadow-md transition duration-200">
+                Chơi Lại
+            </button>
+        </div>
+
+        <!-- Khu vực Trò chơi và Khối chờ -->
+        <div class="flex flex-col lg:flex-row gap-8">
+            <!-- Bảng Trò chơi (9x9) -->
+            <div id="game-board-container" class="flex-1">
+                <div id="game-board" class="grid grid-cols-9 aspect-square shadow-2xl rounded-lg overflow-hidden">
+                    <!-- Ô lưới được tạo bằng JS -->
+                </div>
+            </div>
+
+            <!-- Khối chờ (3 slots) -->
+            <div id="block-slots-container" class="lg:w-1/3 p-4 bg-gray-800 rounded-xl shadow-lg flex flex-col items-center justify-start space-y-6">
+                <h2 class="text-2xl font-bold text-white mb-2 border-b border-gray-700 w-full text-center pb-2">Khối Chờ</h2>
+                <div id="block-slots" class="w-full flex justify-around gap-2">
+                    <!-- Khối chờ được tạo bằng JS -->
+                </div>
+            </div>
+        </div>
+
+        <!-- Game Over Modal (Hidden by default) -->
+        <div id="game-over-modal" class="fixed inset-0 bg-black bg-opacity-70 flex justify-center items-center z-50 hidden">
+            <div class="bg-white p-8 rounded-xl shadow-2xl text-center max-w-sm">
+                <h2 class="text-3xl font-extrabold text-red-600 mb-4">Hết Game!</h2>
+                <p class="text-xl text-gray-700 mb-6">Điểm số cuối cùng của bạn là: <span id="final-score" class="font-bold text-red-600 text-2xl">0</span></p>
+                <button id="modal-reset-button" class="bg-green-600 hover:bg-green-700 text-white font-bold py-3 px-6 rounded-lg shadow-lg transition duration-200">
+                    Chơi Lại
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // =========================================================================
+        // KHỞI TẠO VÀ CẤU HÌNH TRÒ CHƠI
+        // =========================================================================
+
+        const BOARD_SIZE = 9;
+        const GRID_CELLS = BOARD_SIZE * BOARD_SIZE;
+        const CELL_SIZE = 40; // Kích thước cơ bản cho render khối chờ
+        
+        let board = [];
+        let score = 0;
+        let currentBlocks = []; // Mảng chứa 3 khối chờ
+        let selectedBlockIndex = -1;
+        
+        const $board = document.getElementById('game-board');
+        const $scoreDisplay = document.getElementById('score-display');
+        const $blockSlots = document.getElementById('block-slots');
+        const $gameOverModal = document.getElementById('game-over-modal');
+        const $finalScore = document.getElementById('final-score');
+        const $resetButton = document.getElementById('reset-button');
+        const $modalResetButton = document.getElementById('modal-reset-button');
+        
+        // Định nghĩa các hình dạng khối (matrix và màu sắc)
+        const BLOCK_SHAPES = [
+            // Màu sắc được định nghĩa bằng lớp Tailwind CSS
+            { matrix: [[1]], color: 'bg-green-500' }, 
+            { matrix: [[1, 1]], color: 'bg-red-500' },
+            { matrix: [[1], [1]], color: 'bg-red-500' },
+            { matrix: [[1, 1], [1, 1]], color: 'bg-yellow-500' },
+            { matrix: [[1, 1, 1]], color: 'bg-blue-500' },
+            { matrix: [[1], [1], [1]], color: 'bg-blue-500' },
+            { matrix: [[1, 1, 1, 1]], color: 'bg-purple-500' },
+            { matrix: [[1], [1], [1], [1]], color: 'bg-purple-500' },
+            { matrix: [[0, 1], [1, 1]], color: 'bg-pink-500' },
+            { matrix: [[1, 0], [1, 1]], color: 'bg-pink-500' },
+            { matrix: [[1, 1, 1], [0, 1, 0]], color: 'bg-cyan-500' },
+            { matrix: [[1, 1], [0, 1], [0, 1]], color: 'bg-orange-500' },
+        ];
+
+
+        // =========================================================================
+        // HÀM LOGIC TRÒ CHƠI
+        // =========================================================================
+
+        /**
+         * Khởi tạo bảng trò chơi
+         */
+        function initializeGame() {
+            score = 0;
+            board = new Array(GRID_CELLS).fill(0); // 0 = trống
+            $gameOverModal.classList.add('hidden');
+            $board.innerHTML = '';
+            
+            // 1. Tạo các ô lưới HTML
+            for (let i = 0; i < GRID_CELLS; i++) {
+                const cell = document.createElement('div');
+                cell.className = 'grid-cell';
+                cell.dataset.index = i;
+                cell.innerHTML = '<div class="grid-cell-content"></div>';
+                cell.addEventListener('click', () => handleCellClick(i));
+                $board.appendChild(cell);
+            }
+            
+            updateScore(0);
+            generateNewBlocks();
+            renderBoard();
+        }
+
+        /**
+         * Cập nhật điểm số
+         * @param {number} points - Số điểm cộng thêm
+         */
+        function updateScore(points) {
+            score += points;
+            $scoreDisplay.textContent = score;
+        }
+
+        /**
+         * Tạo 3 khối ngẫu nhiên mới
+         */
+        function generateNewBlocks() {
+            currentBlocks = [];
+            for (let i = 0; i < 3; i++) {
+                const shapeIndex = Math.floor(Math.random() * BLOCK_SHAPES.length);
+                currentBlocks.push(BLOCK_SHAPES[shapeIndex]);
+            }
+            renderBlockSlots();
+            checkGameOver();
+        }
+
+        /**
+         * Kiểm tra xem khối có thể đặt hợp lệ tại vị trí (startIndex) không.
+         * @param {Object} block - Khối đang được chọn
+         * @param {number} startIndex - Chỉ số ô bắt đầu trên lưới
+         * @returns {boolean} - true nếu hợp lệ
+         */
+        function isValidPlacement(block, startIndex) {
+            const rows = block.matrix.length;
+            const cols = block.matrix[0].length;
+            const startRow = Math.floor(startIndex / BOARD_SIZE);
+            const startCol = startIndex % BOARD_SIZE;
+
+            for (let r = 0; r < rows; r++) {
+                for (let c = 0; c < cols; c++) {
+                    if (block.matrix[r][c] === 1) {
+                        const boardRow = startRow + r;
+                        const boardCol = startCol + c;
+                        
+                        // Kiểm tra biên
+                        if (boardRow >= BOARD_SIZE || boardCol >= BOARD_SIZE) {
+                            return false; 
+                        }
+                        
+                        // Kiểm tra ô đã bị chiếm
+                        const boardIndex = boardRow * BOARD_SIZE + boardCol;
+                        if (board[boardIndex] !== 0) {
+                            return false; 
+                        }
+                    }
+                }
+            }
+            return true;
+        }
+
+        /**
+         * Đặt khối lên bảng trò chơi và cập nhật trạng thái
+         * @param {Object} block - Khối đang được chọn
+         * @param {number} startIndex - Chỉ số ô bắt đầu trên lưới
+         */
+        function placeBlock(block, startIndex) {
+            const rows = block.matrix.length;
+            const cols = block.matrix[0].length;
+            const startRow = Math.floor(startIndex / BOARD_SIZE);
+            const startCol = startIndex % BOARD_SIZE;
+            
+            let cellsPlaced = 0;
+
+            for (let r = 0; r < rows; r++) {
+                for (let c = 0; c < cols; c++) {
+                    if (block.matrix[r][c] === 1) {
+                        const boardRow = startRow + r;
+                        const boardCol = startCol + c;
+                        const boardIndex = boardRow * BOARD_SIZE + boardCol;
+                        
+                        // Đặt khối
+                        board[boardIndex] = block.color;
+                        cellsPlaced++;
+                    }
+                }
+            }
+            
+            // Xử lý sau khi đặt: Cập nhật điểm, xóa khối chờ, kiểm tra xóa dòng/cột
+            updateScore(cellsPlaced);
+            currentBlocks.splice(selectedBlockIndex, 1);
+            selectedBlockIndex = -1;
+
+            renderBlockSlots();
+            renderBoard();
+            
+            // Thêm điểm thưởng sau khi xóa dòng/cột
+            const clearScore = checkAndClearLines();
+            updateScore(clearScore);
+            
+            // Kiểm tra xem có cần tạo khối mới không
+            if (currentBlocks.length === 0) {
+                generateNewBlocks();
+            } else {
+                checkGameOver(); // Kiểm tra Game Over ngay sau khi đặt khối
+            }
+        }
+        
+        /**
+         * Kiểm tra và xóa các hàng/cột đã đầy
+         * @returns {number} - Điểm thưởng từ việc xóa dòng
+         */
+        function checkAndClearLines() {
+            let clearedLines = 0;
+            const cellsToClear = new Set();
+
+            // Kiểm tra hàng
+            for (let r = 0; r < BOARD_SIZE; r++) {
+                let isRowFull = true;
+                for (let c = 0; c < BOARD_SIZE; c++) {
+                    if (board[r * BOARD_SIZE + c] === 0) {
+                        isRowFull = false;
+                        break;
+                    }
+                }
+                if (isRowFull) {
+                    clearedLines++;
+                    for (let c = 0; c < BOARD_SIZE; c++) {
+                        cellsToClear.add(r * BOARD_SIZE + c);
+                    }
+                }
+            }
+
+            // Kiểm tra cột
+            for (let c = 0; c < BOARD_SIZE; c++) {
+                let isColFull = true;
+                for (let r = 0; r < BOARD_SIZE; r++) {
+                    if (board[r * BOARD_SIZE + c] === 0) {
+                        isColFull = false;
+                        break;
+                    }
+                }
+                if (isColFull) {
+                    clearedLines++;
+                    for (let r = 0; r < BOARD_SIZE; r++) {
+                        cellsToClear.add(r * BOARD_SIZE + c);
+                    }
+                }
+            }
+
+            // Xóa các ô đã đầy
+            cellsToClear.forEach(index => {
+                board[index] = 0;
+            });
+            
+            // Cập nhật lại board sau khi xóa
+            if (clearedLines > 0) {
+                renderBoard();
+            }
+            
+            // Tính điểm thưởng (10 điểm/dòng + 5 điểm thưởng combo)
+            return clearedLines > 0 ? (clearedLines * 10) + (clearedLines > 1 ? (clearedLines * 5) : 0) : 0;
+        }
+
+
+        // =========================================================================
+        // HÀM RENDER (VẼ GIAO DIỆN)
+        // =========================================================================
+
+        /**
+         * Vẽ lại bảng trò chơi
+         */
+        function renderBoard() {
+            const cells = $board.children;
+            for (let i = 0; i < GRID_CELLS; i++) {
+                const content = cells[i].querySelector('.grid-cell-content');
+                
+                // Reset classes
+                cells[i].classList.remove('highlight');
+                content.className = 'grid-cell-content';
+                
+                // Nếu ô có khối
+                if (board[i] !== 0) {
+                    content.classList.add('block-placed', board[i]);
+                } else {
+                    // Ô trống
+                    content.classList.remove(...content.classList);
+                    content.classList.add('grid-cell-content');
+                }
+            }
+        }
+
+        /**
+         * Vẽ 3 khối chờ
+         */
+        function renderBlockSlots() {
+            $blockSlots.innerHTML = '';
+            currentBlocks.forEach((block, index) => {
+                const slot = document.createElement('div');
+                slot.className = `block-slot ${index === selectedBlockIndex ? 'selected' : ''}`;
+                slot.dataset.index = index;
+                slot.addEventListener('click', () => handleBlockSlotClick(index));
+                
+                const rows = block.matrix.length;
+                const cols = block.matrix[0].length;
+                
+                // Sử dụng CSS Grid để vẽ hình dạng khối
+                const gridContainer = document.createElement('div');
+                gridContainer.style.display = 'grid';
+                gridContainer.style.gridTemplateColumns = `repeat(${cols}, ${CELL_SIZE / 2}px)`;
+                gridContainer.style.gridTemplateRows = `repeat(${rows}, ${CELL_SIZE / 2}px)`;
+
+                for (let r = 0; r < rows; r++) {
+                    for (let c = 0; c < cols; c++) {
+                        const cell = document.createElement('div');
+                        cell.style.width = `${CELL_SIZE / 2}px`;
+                        cell.style.height = `${CELL_SIZE / 2}px`;
+                        if (block.matrix[r][c] === 1) {
+                            cell.className = `${block.color} rounded-sm block-placed`;
+                        }
+                        gridContainer.appendChild(cell);
+                    }
+                }
+                
+                slot.appendChild(gridContainer);
+                $blockSlots.appendChild(slot);
+            });
+        }
+        
+        /**
+         * Hiển thị xem khối có thể đặt được ở vị trí hover/click không
+         * @param {number} startIndex - Chỉ số ô bắt đầu trên lưới
+         */
+        function highlightPlacement(startIndex) {
+            const cells = $board.children;
+            
+            // Xóa highlight cũ
+            for (let i = 0; i < GRID_CELLS; i++) {
+                cells[i].classList.remove('highlight');
+            }
+
+            if (selectedBlockIndex === -1) return;
+            
+            const block = currentBlocks[selectedBlockIndex];
+            if (!block) return;
+            
+            const rows = block.matrix.length;
+            const cols = block.matrix[0].length;
+            const startRow = Math.floor(startIndex / BOARD_SIZE);
+            const startCol = startIndex % BOARD_SIZE;
+
+            if (isValidPlacement(block, startIndex)) {
+                // Highlight các ô sẽ được chiếm
+                for (let r = 0; r < rows; r++) {
+                    for (let c = 0; c < cols; c++) {
+                        if (block.matrix[r][c] === 1) {
+                            const boardIndex = (startRow + r) * BOARD_SIZE + (startCol + c);
+                            if (boardIndex < GRID_CELLS) {
+                                cells[boardIndex].classList.add('highlight');
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+
+        // =========================================================================
+        // HÀM XỬ LÝ SỰ KIỆN
+        // =========================================================================
+
+        /**
+         * Xử lý khi click vào một khối chờ
+         * @param {number} index - Chỉ số của khối chờ (0, 1, hoặc 2)
+         */
+        function handleBlockSlotClick(index) {
+            if (index === selectedBlockIndex) {
+                // Bỏ chọn
+                selectedBlockIndex = -1;
+            } else {
+                // Chọn khối mới
+                selectedBlockIndex = index;
+            }
+            renderBlockSlots();
+            renderBoard(); // Xóa highlight cũ
+        }
+        
+        /**
+         * Xử lý khi click vào một ô trên bảng
+         * @param {number} index - Chỉ số ô trên lưới
+         */
+        function handleCellClick(index) {
+            if (selectedBlockIndex === -1) {
+                // Nếu chưa có khối nào được chọn, không làm gì
+                return;
+            }
+            
+            const block = currentBlocks[selectedBlockIndex];
+            
+            if (isValidPlacement(block, index)) {
+                placeBlock(block, index);
+            } else {
+                // Không hợp lệ, có thể báo lỗi hoặc bỏ qua
+                // Tùy chọn: Highlight vị trí không hợp lệ bằng màu đỏ nhanh
+                const cells = $board.children;
+                cells[index].classList.add('bg-red-500');
+                setTimeout(() => cells[index].classList.remove('bg-red-500'), 150);
+            }
+        }
+
+        /**
+         * Thêm sự kiện hover cho các ô lưới (để highlight)
+         */
+        function setupHoverEvents() {
+            const cells = $board.children;
+            for (let i = 0; i < GRID_CELLS; i++) {
+                cells[i].addEventListener('mouseover', () => {
+                    if (selectedBlockIndex !== -1) {
+                        highlightPlacement(i);
+                    }
+                });
+                cells[i].addEventListener('mouseout', () => {
+                    // Xóa highlight khi chuột rời đi
+                    for (let j = 0; j < GRID_CELLS; j++) {
+                        cells[j].classList.remove('highlight');
+                    }
+                });
+            }
+        }
+
+
+        // =========================================================================
+        // HÀM GAME OVER VÀ KIỂM TRA
+        // =========================================================================
+
+        /**
+         * Kiểm tra xem còn nước đi nào hợp lệ không
+         */
+        function checkGameOver() {
+            let possibleMovesExist = false;
+            
+            // Duyệt qua tất cả các khối chờ
+            for (const block of currentBlocks) {
+                // Duyệt qua tất cả các ô trên bảng
+                for (let i = 0; i < GRID_CELLS; i++) {
+                    if (isValidPlacement(block, i)) {
+                        possibleMovesExist = true;
+                        break; // Tìm thấy 1 nước đi, thoát
+                    }
+                }
+                if (possibleMovesExist) break;
+            }
+
+            if (!possibleMovesExist && currentBlocks.length > 0) {
+                gameOver();
+            } else if (currentBlocks.length === 0) {
+                // Nếu không còn khối chờ, tạo khối mới (đã xử lý trong placeBlock)
+            }
+        }
+
+        /**
+         * Kết thúc trò chơi
+         */
+        function gameOver() {
+            $finalScore.textContent = score;
+            $gameOverModal.classList.remove('hidden');
+        }
+
+
+        // =========================================================================
+        // KHỞI TẠO CHUNG
+        // =========================================================================
+
+        // Sự kiện chơi lại
+        $resetButton.addEventListener('click', initializeGame);
+        $modalResetButton.addEventListener('click', initializeGame);
+
+        // Khởi tạo trò chơi lần đầu
+        window.onload = function() {
+            initializeGame();
+            setupHoverEvents(); // Thêm highlight khi khởi tạo xong ô lưới
+        };
+
+    </script>
+</body>
+</html>
